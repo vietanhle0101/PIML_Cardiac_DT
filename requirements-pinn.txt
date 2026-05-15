@@ -1,0 +1,5 @@
+deepxde>=1.10
+tensorflow>=2.12
+numpy
+matplotlib
+scipy

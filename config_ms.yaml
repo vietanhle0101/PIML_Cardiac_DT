@@ -1,0 +1,24 @@
+data:
+      core_name: ''
+      v_file_name: 'Data/MS/Single_Corner/vm.igb'
+      w_file_name: 'Data/MS/Single_Corner/vm.igb'
+      pt_file_name: 'Data/MS/Mesh/block'
+      scenario_name: 'Single_Corner'
+      ionic_model_name: 'MS'
+      noise: False
+      w_input: False
+      inverse: False
+      heter: False
+      plot: True
+      animation: False
+      skip_full_plot: True
+
+training:
+      # Small defaults for a first smoke run. Increase after it trains cleanly.
+      num_domain: 2000
+      num_boundary: 400
+      num_test: 1000
+      epochs_init: 100
+      epochs_main: 1000
+      lr: 0.0005
+      use_lbfgs: False
