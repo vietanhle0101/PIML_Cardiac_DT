@@ -8,6 +8,8 @@ import yaml
 
 from data_load import load_opencarp_2d_voltage, subset_time_window
 from model import MLP_Net
+from physics import denormalize_coords
+from training import sample_boundary_points, sample_domain_points, sample_initial_points
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path("outputs/.mplconfig").resolve()))
 import matplotlib.pyplot as plt
@@ -34,6 +36,56 @@ def predict_vm(model, coords_norm, device, batch_size):
             vm = model(batch)[:, 0:1]
             predictions.append(vm.cpu().numpy())
     return np.vstack(predictions)
+
+
+def build_collocation_points(data, args, device):
+    if not args.show_collocation:
+        return None
+
+    domain = sample_domain_points(args.num_domain_plot, device)
+    boundary, _ = sample_boundary_points(args.num_boundary_plot, device)
+    initial, _ = sample_initial_points(data, args.num_initial_plot, device)
+
+    overlays = {}
+    for name, coords_norm in [
+        ("domain", domain),
+        ("boundary", boundary),
+        ("initial", initial),
+    ]:
+        x, y, t = denormalize_coords(coords_norm, data.bounds)
+        overlays[name] = {
+            "x": x.detach().cpu().numpy().reshape(-1),
+            "y": y.detach().cpu().numpy().reshape(-1),
+            "t": t.detach().cpu().numpy().reshape(-1),
+        }
+    return overlays
+
+
+def plot_collocation_points(points, output_path):
+    styles = {
+        "domain": {"s": 5, "c": "0.35", "alpha": 0.35, "label": "domain"},
+        "boundary": {"s": 10, "c": "cyan", "alpha": 0.8, "label": "boundary"},
+        "initial": {"s": 12, "c": "orange", "alpha": 0.8, "label": "initial"},
+    }
+
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4), constrained_layout=True)
+    projections = [
+        ("x", "y", "x-y projection"),
+        ("x", "t", "x-t projection"),
+        ("y", "t", "y-t projection"),
+    ]
+
+    for ax, (x_key, y_key, title) in zip(axes, projections):
+        for name, coords in points.items():
+            ax.scatter(coords[x_key], coords[y_key], edgecolors="none", **styles[name])
+        ax.set_xlabel(x_key)
+        ax.set_ylabel(y_key)
+        ax.set_title(title)
+        ax.legend(loc="best")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=200)
+    plt.close(fig)
 
 
 def plot_time_slices(data, vm_pred, time_indices, output_path):
@@ -86,6 +138,11 @@ def main():
     parser.add_argument("--batch-size", type=int, default=16384)
     parser.add_argument("--output", default="outputs/pinn_time_slices.png")
     parser.add_argument("--time-indices", type=int, nargs="+", default=None)
+    parser.add_argument("--show-collocation", action="store_true")
+    parser.add_argument("--collocation-output", default="outputs/collocation_points.png")
+    parser.add_argument("--num-domain-plot", type=int, default=None)
+    parser.add_argument("--num-boundary-plot", type=int, default=None)
+    parser.add_argument("--num-initial-plot", type=int, default=None)
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -97,6 +154,10 @@ def main():
     z_slice = data_config.get("z_slice", "middle")
     time_min = data_config.get("time_min")
     time_max = data_config.get("time_max")
+    training_config = config.get("training", {})
+    args.num_domain_plot = args.num_domain_plot or int(training_config.get("num_domain", 256))
+    args.num_boundary_plot = args.num_boundary_plot or int(training_config.get("num_boundary", 128))
+    args.num_initial_plot = args.num_initial_plot or int(training_config.get("num_initial", args.num_boundary_plot))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(args.checkpoint, map_location=device)
@@ -119,6 +180,10 @@ def main():
 
     plot_time_slices(data, vm_pred, args.time_indices, Path(args.output))
 
+    collocation_points = build_collocation_points(data, args, device)
+    if collocation_points is not None:
+        plot_collocation_points(collocation_points, Path(args.collocation_output))
+
     print(f"checkpoint: {args.checkpoint}")
     print(f"device: {device}")
     print(f"vm_pred shape: {vm_pred.shape}")
@@ -127,6 +192,8 @@ def main():
     print(f"MAE: {mae:.6e}")
     print(f"max abs error: {max_error:.6e}")
     print(f"saved plot: {args.output}")
+    if args.show_collocation:
+        print(f"saved collocation plot: {args.collocation_output}")
 
 
 if __name__ == "__main__":

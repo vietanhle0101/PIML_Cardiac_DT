@@ -22,7 +22,7 @@ model:
 
 training:
       num_domain: 200
-      num_boundary: 500
+      num_boundary: 50
       num_initial: 50
       train_fraction: 0.25
       batch_size: 4096
@@ -31,7 +31,7 @@ training:
       lr: 0.001
       lr_factor: 0.5
       lr_patience: 10
-      min_lr: 1e-6
+      min_lr: 0.000001
       early_stop_patience: 30
       early_stop_min_delta: 0.0
       log_every: 10

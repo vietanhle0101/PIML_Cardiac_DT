@@ -13,8 +13,7 @@ cardiac-simulator/
 openCARP-PINNs/
 carputils/
 
-# Generated training outputs/checkpoints
-outputs/
+# Generated training checkpoints
 *.pt
 *.pth
 *.h5

@@ -22,6 +22,7 @@ def config_path(base_path, file_name):
         return str(path)
     return str(Path(base_path) / path)
 
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config_ms.yaml")
@@ -42,28 +43,28 @@ def main():
     args = SimpleNamespace(
         vm=config_path(core_name, data_config["v_file_name"]),
         pts=config_path(core_name, data_config["pt_file_name"]),
-        dt=data_config.get("dt", 1.0),
+        dt=float(data_config.get("dt", 1.0)),
         z_slice=data_config.get("z_slice", "middle"),
-        time_min=data_config.get("time_min"),
-        time_max=data_config.get("time_max"),
+        time_min=float(data_config["time_min"]) if data_config.get("time_min") is not None else None,
+        time_max=float(data_config["time_max"]) if data_config.get("time_max") is not None else None,
         hidden_widths=model_config.get("hidden_widths", [64, 64, 64, 64, 64]),
-        num_domain=training_config.get("num_domain", 256),
-        num_boundary=training_config.get("num_boundary", 128),
-        num_initial=training_config.get("num_initial", training_config.get("num_boundary", 128)),
-        train_fraction=training_config.get("train_fraction", 0.25),
-        batch_size=training_config.get("batch_size", 4096),
-        epochs=training_config.get("epochs", 200),
-        lr=training_config.get("lr", 1e-3),
-        lr_factor=training_config.get("lr_factor", 0.5),
-        lr_patience=training_config.get("lr_patience", 10),
-        min_lr=training_config.get("min_lr", 1e-6),
-        early_stop_patience=training_config.get("early_stop_patience", 30),
-        early_stop_min_delta=training_config.get("early_stop_min_delta", 0.0),
-        log_every=training_config.get("log_every", 10),
-        data_weight=cli_args.data_weight if cli_args.data_weight is not None else training_config.get("data_weight", 1.0),
-        physics_weight=cli_args.physics_weight if cli_args.physics_weight is not None else training_config.get("physics_weight", 1.0),
-        boundary_weight=cli_args.boundary_weight if cli_args.boundary_weight is not None else training_config.get("boundary_weight", 1.0),
-        initial_weight=cli_args.initial_weight if cli_args.initial_weight is not None else training_config.get("initial_weight", 1.0),
+        num_domain=int(training_config.get("num_domain", 256)),
+        num_boundary=int(training_config.get("num_boundary", 128)),
+        num_initial=int(training_config.get("num_initial", training_config.get("num_boundary", 128))),
+        train_fraction=float(training_config.get("train_fraction", 0.25)),
+        batch_size=int(training_config.get("batch_size", 4096)),
+        epochs=int(training_config.get("epochs", 200)),
+        lr=float(training_config.get("lr", 1e-3)),
+        lr_factor=float(training_config.get("lr_factor", 0.5)),
+        lr_patience=int(training_config.get("lr_patience", 10)),
+        min_lr=float(training_config.get("min_lr", 1e-6)),
+        early_stop_patience=int(training_config.get("early_stop_patience", 30)),
+        early_stop_min_delta=float(training_config.get("early_stop_min_delta", 0.0)),
+        log_every=int(training_config.get("log_every", 10)),
+        data_weight=float(cli_args.data_weight if cli_args.data_weight is not None else training_config.get("data_weight", 1.0)),
+        physics_weight=float(cli_args.physics_weight if cli_args.physics_weight is not None else training_config.get("physics_weight", 1.0)),
+        boundary_weight=float(cli_args.boundary_weight if cli_args.boundary_weight is not None else training_config.get("boundary_weight", 1.0)),
+        initial_weight=float(cli_args.initial_weight if cli_args.initial_weight is not None else training_config.get("initial_weight", 1.0)),
         checkpoint=cli_args.checkpoint,
         seed=seed,
     )
