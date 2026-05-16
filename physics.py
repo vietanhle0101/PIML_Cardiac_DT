@@ -1,9 +1,8 @@
 import torch
 import torch.nn.functional as F
 
-
 MS_PARAMS = {
-    "diffusion": 0.001,
+    "diffusion": 0.01,
     "tau_in": 0.3,
     "tau_out": 5.0,
     "tau_open": 120.0,
@@ -16,6 +15,15 @@ MS_PARAMS = {
     "stim_duration": 2.0,
     "stim_magnitude": 1.0,
 }
+
+
+def ms_params_from_config(config):
+    """Merge Mitchell-Schaeffer defaults with an optional config['physics'] section."""
+    params = MS_PARAMS.copy()
+    params.update(config.get("physics", {}))
+    if "stim_center" in params:
+        params["stim_center"] = tuple(params["stim_center"])
+    return params
 
 
 def denormalize_coords(coords_norm, bounds):
@@ -107,3 +115,28 @@ def mitchell_schaeffer_pde_loss(model, coords_norm, bounds, params=None):
     loss_vm = F.mse_loss(vm_residual, zeros_vm)
     loss_h = F.mse_loss(h_residual, zeros_h)
     return loss_vm, loss_h
+
+
+def boundary_no_flux_loss(model, boundary_coords, boundary_normals, bounds):
+    """Compute no-flux voltage boundary loss dV/dn = 0."""
+    boundary_coords = boundary_coords.clone().detach().requires_grad_(True)
+    pred = model(boundary_coords)
+    vm = pred[:, 0:1]
+
+    grad_vm = gradients(vm, boundary_coords)
+    sx = derivative_scale(bounds, "x_min", "x_max")
+    sy = derivative_scale(bounds, "y_min", "y_max")
+
+    vm_x = grad_vm[:, 0:1] * sx
+    vm_y = grad_vm[:, 1:2] * sy
+    normal_x = boundary_normals[:, 0:1]
+    normal_y = boundary_normals[:, 1:2]
+
+    vm_normal = vm_x * normal_x + vm_y * normal_y
+    return F.mse_loss(vm_normal, torch.zeros_like(vm_normal))
+
+
+def initial_condition_loss(model, initial_coords, initial_vm):
+    """Compute voltage initial-condition loss at t = 0."""
+    vm_pred = model(initial_coords)[:, 0:1]
+    return F.mse_loss(vm_pred, initial_vm)

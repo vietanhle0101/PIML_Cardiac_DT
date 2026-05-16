@@ -119,7 +119,14 @@ def load_opencarp_2d_voltage(
             f"expected {expected_nodes} nodes from unique x/y, found {xy.shape[0]}."
         )
 
-    vm = vm_slice.T.reshape(x.shape[0], y.shape[0], t.shape[0]).astype(np.float32)
+    # openCARP point ordering is row-major in y-x for each z-slice: x changes
+    # fastest within each y row. Reshape as (y, x, t), then transpose to the
+    # project convention (x, y, t).
+    vm = (
+        vm_slice.T.reshape(y.shape[0], x.shape[0], t.shape[0])
+        .transpose(1, 0, 2)
+        .astype(np.float32)
+    )
 
     x_grid, y_grid, t_grid = np.meshgrid(x, y, t, indexing="ij")
     coords = np.column_stack(
@@ -157,6 +164,54 @@ def load_opencarp_2d_voltage(
     )
 
 
+def subset_time_window(
+    data: OpenCARPVoltageData,
+    t_min: float | None = None,
+    t_max: float | None = None,
+) -> OpenCARPVoltageData:
+    """Return a copy of loaded data restricted to a physical time window."""
+    time_mask = np.ones(data.t.shape, dtype=bool)
+    if t_min is not None:
+        time_mask &= data.t >= t_min
+    if t_max is not None:
+        time_mask &= data.t <= t_max
+
+    if not np.any(time_mask):
+        raise ValueError(f"No time frames found in requested window [{t_min}, {t_max}].")
+
+    t = data.t[time_mask].astype(np.float32)
+    vm = data.vm[:, :, time_mask].astype(np.float32)
+
+    x_grid, y_grid, t_grid = np.meshgrid(data.x, data.y, t, indexing="ij")
+    coords = np.column_stack(
+        [x_grid.reshape(-1), y_grid.reshape(-1), t_grid.reshape(-1)]
+    ).astype(np.float32)
+    values = vm.reshape(-1, 1).astype(np.float32)
+
+    bounds = data.bounds.copy()
+    bounds["t_min"] = float(t.min())
+    bounds["t_max"] = float(t.max())
+
+    coords_norm = np.column_stack(
+        [
+            normalize_to_minus_one_one(coords[:, 0], bounds["x_min"], bounds["x_max"]),
+            normalize_to_minus_one_one(coords[:, 1], bounds["y_min"], bounds["y_max"]),
+            normalize_to_minus_one_one(coords[:, 2], bounds["t_min"], bounds["t_max"]),
+        ]
+    ).astype(np.float32)
+
+    return OpenCARPVoltageData(
+        x=data.x,
+        y=data.y,
+        t=t,
+        vm=vm,
+        coords=coords,
+        coords_norm=coords_norm,
+        values=values,
+        bounds=bounds,
+    )
+
+
 def train_test_split_points(
     coords: np.ndarray,
     values: np.ndarray,
@@ -170,6 +225,4 @@ def train_test_split_points(
     train_idx = indices[:n_train]
     test_idx = indices[n_train:]
     return coords[train_idx], values[train_idx], coords[test_idx], values[test_idx]
-
-
 

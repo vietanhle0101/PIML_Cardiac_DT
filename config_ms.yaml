@@ -12,13 +12,44 @@ data:
       plot: True
       animation: False
       skip_full_plot: True
+      dt: 1.0
+      z_slice: 'middle'
+      time_min: 0.0
+      time_max: 50.0
+
+model:
+      hidden_widths: [64, 64, 64, 64, 64]
 
 training:
-      # Small defaults for a first smoke run. Increase after it trains cleanly.
-      num_domain: 2000
-      num_boundary: 400
-      num_test: 1000
-      epochs_init: 100
-      epochs_main: 1000
-      lr: 0.0005
-      use_lbfgs: False
+      num_domain: 200
+      num_boundary: 500
+      num_initial: 50
+      train_fraction: 0.25
+      batch_size: 4096
+      epochs: 200
+      seed: 12
+      lr: 0.001
+      lr_factor: 0.5
+      lr_patience: 10
+      min_lr: 1e-6
+      early_stop_patience: 30
+      early_stop_min_delta: 0.0
+      log_every: 10
+      data_weight: 1.0
+      physics_weight: 1.0
+      boundary_weight: 1.0
+      initial_weight: 1.0
+
+physics:
+      diffusion: 0.01
+      tau_in: 0.3
+      tau_out: 5.0
+      tau_open: 120.0
+      tau_close: 150.0
+      v_gate: 0.13
+      switch_sharpness: 80.0
+      stim_center: [0.0, 0.5]
+      stim_radius: 0.15
+      stim_start: 0.0
+      stim_duration: 2.0
+      stim_magnitude: 1.0
