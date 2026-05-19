@@ -5,8 +5,9 @@ from pathlib import Path
 import numpy as np
 import torch
 import yaml
+from PIL import Image
 
-from data_load import load_opencarp_2d_voltage, subset_time_window
+from data_load import load_ms_npz_2d_voltage, load_opencarp_2d_voltage, subset_time_window
 from model import MLP_Net
 from physics import denormalize_coords
 from training import sample_boundary_points, sample_domain_points, sample_initial_points
@@ -131,6 +132,57 @@ def plot_time_slices(data, vm_pred, time_indices, output_path):
     plt.close(fig)
 
 
+def plot_prediction_frame(data, vm_pred_frame, time_idx, output_path, vmin, vmax):
+    fig, ax = plt.subplots(figsize=(6.2, 5.4), constrained_layout=True)
+    extent = [float(data.x.min()), float(data.x.max()), float(data.y.min()), float(data.y.max())]
+    image = ax.imshow(
+        vm_pred_frame.T,
+        origin="lower",
+        extent=extent,
+        vmin=vmin,
+        vmax=vmax,
+        cmap="turbo",
+        aspect="equal",
+    )
+    ax.set_title(f"PINN predicted u, t={data.t[time_idx]:.1f}")
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    fig.colorbar(image, ax=ax, label="u")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_gif(frame_paths, output_path, duration_ms):
+    images = [Image.open(path).convert("P", palette=Image.ADAPTIVE) for path in frame_paths]
+    images[0].save(
+        output_path,
+        save_all=True,
+        append_images=images[1:],
+        duration=duration_ms,
+        loop=0,
+        optimize=True,
+    )
+    for image in images:
+        image.close()
+
+
+def save_prediction_gif(data, vm_pred, output_path, num_frames, duration_ms):
+    output_path = Path(output_path)
+    frame_dir = output_path.parent / "prediction_frames"
+    frame_indices = np.linspace(0, data.t.shape[0] - 1, num_frames, dtype=int)
+    frame_paths = []
+    vmin = float(data.vm.min())
+    vmax = float(data.vm.max())
+
+    for time_idx in frame_indices:
+        frame_path = frame_dir / f"pred_u_{time_idx:04d}.png"
+        plot_prediction_frame(data, vm_pred[:, :, time_idx], time_idx, frame_path, vmin, vmax)
+        frame_paths.append(frame_path)
+
+    save_gif(frame_paths, output_path, duration_ms)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config_ms.yaml")
@@ -138,6 +190,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=16384)
     parser.add_argument("--output", default="outputs/pinn_time_slices.png")
     parser.add_argument("--time-indices", type=int, nargs="+", default=None)
+    parser.add_argument("--gif-output", default=None)
+    parser.add_argument("--num-gif-frames", type=int, default=80)
+    parser.add_argument("--gif-duration-ms", type=int, default=70)
     parser.add_argument("--show-collocation", action="store_true")
     parser.add_argument("--collocation-output", default="outputs/collocation_points.png")
     parser.add_argument("--num-domain-plot", type=int, default=None)
@@ -148,8 +203,7 @@ def main():
     config = load_config(args.config)
     data_config = config.get("data", {})
     core_name = data_config.get("core_name", "")
-    vm_path = config_path(core_name, data_config["v_file_name"])
-    pts_path = config_path(core_name, data_config["pt_file_name"])
+    mesh_type = data_config.get("mesh_type", "rectangular")
     dt = data_config.get("dt", 1.0)
     z_slice = data_config.get("z_slice", "middle")
     time_min = data_config.get("time_min")
@@ -166,7 +220,19 @@ def main():
     model = MLP_Net(hidden_widths=hidden_widths).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
 
-    data = load_opencarp_2d_voltage(vm_path, pts_path, dt=dt, z_slice=z_slice)
+    if mesh_type == "ms_npz":
+        npz_path = config_path(core_name, data_config["npz_file_name"])
+        data = load_ms_npz_2d_voltage(npz_path)
+    elif mesh_type == "rectangular":
+        vm_path = config_path(core_name, data_config["v_file_name"])
+        pts_path = config_path(core_name, data_config["pt_file_name"])
+        data = load_opencarp_2d_voltage(vm_path, pts_path, dt=dt, z_slice=z_slice)
+    else:
+        raise ValueError(
+            f"evaluate_pinn.py supports rectangular and ms_npz data, got {mesh_type!r}. "
+            "Use evaluate_spiral_pinn.py for unstructured openCARP spiral data."
+        )
+
     data = subset_time_window(data, t_min=time_min, t_max=time_max)
     vm_pred_flat = predict_vm(model, data.coords_norm, device, args.batch_size)
     vm_pred = vm_pred_flat.reshape(data.vm.shape)
@@ -179,6 +245,14 @@ def main():
         args.time_indices = np.linspace(0, data.t.shape[0] - 1, 9, dtype=int).tolist()
 
     plot_time_slices(data, vm_pred, args.time_indices, Path(args.output))
+    if args.gif_output is not None:
+        save_prediction_gif(
+            data,
+            vm_pred,
+            args.gif_output,
+            args.num_gif_frames,
+            args.gif_duration_ms,
+        )
 
     collocation_points = build_collocation_points(data, args, device)
     if collocation_points is not None:
@@ -192,6 +266,8 @@ def main():
     print(f"MAE: {mae:.6e}")
     print(f"max abs error: {max_error:.6e}")
     print(f"saved plot: {args.output}")
+    if args.gif_output is not None:
+        print(f"saved prediction gif: {args.gif_output}")
     if args.show_collocation:
         print(f"saved collocation plot: {args.collocation_output}")
 

@@ -288,6 +288,63 @@ def load_opencarp_unstructured_2d_voltage(
     )
 
 
+def load_ms_npz_2d_voltage(npz_path: str | Path) -> OpenCARPVoltageData:
+    """Load generated Mitchell-Schaeffer 2D data from a compressed .npz file."""
+    data = np.load(npz_path, allow_pickle=True)
+    x = data["x"].astype(np.float32)
+    y = data["y"].astype(np.float32)
+    t = data["t"].astype(np.float32)
+    u = data["u"].astype(np.float32)
+
+    if u.shape != (t.shape[0], x.shape[0], y.shape[0]):
+        raise ValueError(
+            "Expected u shape (time, x, y), got "
+            f"{u.shape} for t={t.shape}, x={x.shape}, y={y.shape}."
+        )
+
+    vm = u.transpose(1, 2, 0).astype(np.float32)
+    x_grid, y_grid, t_grid = np.meshgrid(x, y, t, indexing="ij")
+    coords = np.column_stack(
+        [x_grid.reshape(-1), y_grid.reshape(-1), t_grid.reshape(-1)]
+    ).astype(np.float32)
+    values = vm.reshape(-1, 1).astype(np.float32)
+
+    bounds = {
+        "x_min": float(x.min()),
+        "x_max": float(x.max()),
+        "y_min": float(y.min()),
+        "y_max": float(y.max()),
+        "t_min": float(t.min()),
+        "t_max": float(t.max()),
+        "z_selected": 0.0,
+        "vm_raw_min": float(u.min()),
+        "vm_raw_max": float(u.max()),
+        "vm_scale_min": 0.0,
+        "vm_scale_max": 1.0,
+        "vm_normalized": True,
+    }
+
+    coords_norm = np.column_stack(
+        [
+            normalize_to_minus_one_one(coords[:, 0], bounds["x_min"], bounds["x_max"]),
+            normalize_to_minus_one_one(coords[:, 1], bounds["y_min"], bounds["y_max"]),
+            normalize_to_minus_one_one(coords[:, 2], bounds["t_min"], bounds["t_max"]),
+        ]
+    ).astype(np.float32)
+
+    return OpenCARPVoltageData(
+        x=x,
+        y=y,
+        t=t,
+        vm=vm,
+        coords=coords,
+        coords_norm=coords_norm,
+        values=values,
+        bounds=bounds,
+        mesh_type="rectangular",
+    )
+
+
 def subset_time_window(
     data: OpenCARPVoltageData,
     t_min: float | None = None,

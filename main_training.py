@@ -6,6 +6,7 @@ import torch
 import yaml
 
 from data_load import (
+    load_ms_npz_2d_voltage,
     load_opencarp_2d_voltage,
     load_opencarp_unstructured_2d_voltage,
     subset_time_window,
@@ -46,9 +47,10 @@ def main():
     seed = training_config.get("seed", 42)
     torch.manual_seed(seed)
     args = SimpleNamespace(
-        vm=config_path(core_name, data_config["v_file_name"]),
-        pts=config_path(core_name, data_config["pt_file_name"]),
+        vm=config_path(core_name, data_config["v_file_name"]) if data_config.get("v_file_name") else None,
+        pts=config_path(core_name, data_config["pt_file_name"]) if data_config.get("pt_file_name") else None,
         elem=config_path(core_name, data_config["elem_file_name"]) if data_config.get("elem_file_name") else None,
+        npz=config_path(core_name, data_config["npz_file_name"]) if data_config.get("npz_file_name") else None,
         mesh_type=data_config.get("mesh_type", "rectangular"),
         dt=float(data_config.get("dt", 1.0)),
         z_slice=data_config.get("z_slice", "middle"),
@@ -93,7 +95,13 @@ def main():
             vm_max=args.vm_max,
         )
     elif args.mesh_type == "rectangular":
+        if args.vm is None or args.pts is None:
+            raise ValueError("rectangular data requires v_file_name and pt_file_name.")
         data = load_opencarp_2d_voltage(args.vm, args.pts, dt=args.dt, z_slice=args.z_slice)
+    elif args.mesh_type == "ms_npz":
+        if args.npz is None:
+            raise ValueError("ms_npz data requires npz_file_name.")
+        data = load_ms_npz_2d_voltage(args.npz)
     else:
         raise ValueError(f"Unsupported mesh_type: {args.mesh_type}")
     data = subset_time_window(data, t_min=args.time_min, t_max=args.time_max)

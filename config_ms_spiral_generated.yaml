@@ -1,0 +1,47 @@
+data:
+      core_name: ''
+      mesh_type: 'ms_npz'
+      npz_file_name: 'Data/MS/Spiral/ms_spiral_opencarp_like.npz'
+      scenario_name: 'MS_Spiral_Generated'
+      ionic_model_name: 'Mitchell_Schaeffer'
+      time_min: 0.0
+      time_max: 180.0
+
+model:
+      hidden_widths: [128, 128, 128, 128]
+
+training:
+      num_domain: 1024
+      num_boundary: 256
+      num_initial: 256
+      train_fraction: 0.03
+      max_train_points: 50000
+      max_test_points: 10000
+      batch_size: 8192
+      epochs: 500
+      seed: 12
+      lr: 0.001
+      lr_factor: 0.5
+      lr_patience: 10
+      min_lr: 0.000001
+      early_stop_patience: 25
+      early_stop_min_delta: 0.0
+      log_every: 5
+      data_weight: 1.0
+      physics_weight: 0.1
+      boundary_weight: 0.1
+      initial_weight: 0.1
+
+physics:
+      diffusion: 0.01
+      tau_in: 0.3
+      tau_out: 5.0
+      tau_open: 120.0
+      tau_close: 150.0
+      v_gate: 0.13
+      switch_sharpness: 80.0
+      stim_center: [0.14, 0.5]
+      stim_radius: 0.04
+      stim_start: 0.0
+      stim_duration: 2.0
+      stim_magnitude: 0.0
