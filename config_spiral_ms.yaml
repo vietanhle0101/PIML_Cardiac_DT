@@ -1,0 +1,53 @@
+data:
+      core_name: ''
+      mesh_type: 'unstructured'
+      v_file_name: 'Data/RP_E/Spiral/vm.igb'
+      pt_file_name: 'Data/RP_E/Spiral/block.pts'
+      elem_file_name: 'Data/RP_E/Spiral/block.elem'
+      scenario_name: 'RP_E_Spiral'
+      ionic_model_name: 'Courtemanche_data_with_MS_prior'
+      normalize_vm: True
+      vm_min: -85.0
+      vm_max: 35.0
+      dt: 1.0
+      time_min: 0.0
+      time_max: 1000.0
+
+model:
+      hidden_widths: [128, 128, 128, 128]
+
+training:
+      num_domain: 512
+      num_boundary: 128
+      num_initial: 128
+      train_fraction: 0.03
+      max_train_points: 100000
+      max_test_points: 50000
+      batch_size: 8192
+      epochs: 200
+      seed: 12
+      lr: 0.001
+      lr_factor: 0.5
+      lr_patience: 10
+      min_lr: 0.000001
+      early_stop_patience: 20
+      early_stop_min_delta: 0.0
+      log_every: 5
+      data_weight: 1.0
+      physics_weight: 0.01
+      boundary_weight: 0.01
+      initial_weight: 0.1
+
+physics:
+      diffusion: 0.01
+      tau_in: 0.3
+      tau_out: 5.0
+      tau_open: 120.0
+      tau_close: 150.0
+      v_gate: 0.13
+      switch_sharpness: 80.0
+      stim_center: [0.14, 0.5]
+      stim_radius: 0.04
+      stim_start: 0.0
+      stim_duration: 2.0
+      stim_magnitude: 0.0

@@ -5,7 +5,12 @@ from pathlib import Path
 import torch
 import yaml
 
-from data_load import load_opencarp_2d_voltage, subset_time_window, train_test_split_points
+from data_load import (
+    load_opencarp_2d_voltage,
+    load_opencarp_unstructured_2d_voltage,
+    subset_time_window,
+    train_test_split_points,
+)
 from model import MLP_Net
 from physics import ms_params_from_config
 from training import train_pinn
@@ -43,15 +48,22 @@ def main():
     args = SimpleNamespace(
         vm=config_path(core_name, data_config["v_file_name"]),
         pts=config_path(core_name, data_config["pt_file_name"]),
+        elem=config_path(core_name, data_config["elem_file_name"]) if data_config.get("elem_file_name") else None,
+        mesh_type=data_config.get("mesh_type", "rectangular"),
         dt=float(data_config.get("dt", 1.0)),
         z_slice=data_config.get("z_slice", "middle"),
         time_min=float(data_config["time_min"]) if data_config.get("time_min") is not None else None,
         time_max=float(data_config["time_max"]) if data_config.get("time_max") is not None else None,
+        normalize_vm=bool(data_config.get("normalize_vm", False)),
+        vm_min=float(data_config["vm_min"]) if data_config.get("vm_min") is not None else None,
+        vm_max=float(data_config["vm_max"]) if data_config.get("vm_max") is not None else None,
         hidden_widths=model_config.get("hidden_widths", [64, 64, 64, 64, 64]),
         num_domain=int(training_config.get("num_domain", 256)),
         num_boundary=int(training_config.get("num_boundary", 128)),
         num_initial=int(training_config.get("num_initial", training_config.get("num_boundary", 128))),
         train_fraction=float(training_config.get("train_fraction", 0.25)),
+        max_train_points=int(training_config["max_train_points"]) if training_config.get("max_train_points") is not None else None,
+        max_test_points=int(training_config["max_test_points"]) if training_config.get("max_test_points") is not None else None,
         batch_size=int(training_config.get("batch_size", 4096)),
         epochs=int(training_config.get("epochs", 200)),
         lr=float(training_config.get("lr", 1e-3)),
@@ -70,7 +82,20 @@ def main():
     )
     physics_params = ms_params_from_config(config)
 
-    data = load_opencarp_2d_voltage(args.vm, args.pts, dt=args.dt, z_slice=args.z_slice)
+    if args.mesh_type == "unstructured":
+        data = load_opencarp_unstructured_2d_voltage(
+            args.vm,
+            args.pts,
+            elem_path=args.elem,
+            dt=args.dt,
+            normalize_vm=args.normalize_vm,
+            vm_min=args.vm_min,
+            vm_max=args.vm_max,
+        )
+    elif args.mesh_type == "rectangular":
+        data = load_opencarp_2d_voltage(args.vm, args.pts, dt=args.dt, z_slice=args.z_slice)
+    else:
+        raise ValueError(f"Unsupported mesh_type: {args.mesh_type}")
     data = subset_time_window(data, t_min=args.time_min, t_max=args.time_max)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -83,6 +108,8 @@ def main():
         data.values,
         train_fraction=args.train_fraction,
         seed=args.seed,
+        max_train_points=args.max_train_points,
+        max_test_points=args.max_test_points,
     )
     train_pinn(
         model,

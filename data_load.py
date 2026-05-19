@@ -32,6 +32,9 @@ class OpenCARPVoltageData:
     coords_norm: np.ndarray
     values: np.ndarray
     bounds: dict
+    mesh_type: str = "rectangular"
+    points: np.ndarray | None = None
+    triangles: np.ndarray | None = None
 
 
 def read_array_igb(igb_path: str | Path) -> np.ndarray:
@@ -71,10 +74,41 @@ def read_pts(base_path: str | Path) -> np.ndarray:
     return points
 
 
+def read_elem_triangles(base_path: str | Path) -> np.ndarray:
+    """Read triangle connectivity from a CARP .elem file."""
+    base_path = Path(base_path)
+    elem_path = base_path if base_path.suffix == ".elem" else base_path.with_suffix(".elem")
+
+    triangles = []
+    with elem_path.open() as file:
+        expected_count = int(file.readline().split()[0])
+        for line in file:
+            parts = line.split()
+            if not parts:
+                continue
+            if parts[0] != "Tr":
+                raise ValueError(f"Only triangular 2D elements are supported, found {parts[0]}.")
+            triangles.append([int(parts[1]), int(parts[2]), int(parts[3])])
+
+    triangles = np.asarray(triangles, dtype=np.int32)
+    if triangles.shape[0] != expected_count:
+        raise ValueError(
+            f"Triangle count mismatch in {elem_path}: expected {expected_count}, "
+            f"read {triangles.shape[0]}."
+        )
+    return triangles
+
+
 def normalize_to_minus_one_one(values: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
     if np.isclose(vmax, vmin):
         return np.zeros_like(values, dtype=np.float32)
     return (2.0 * (values - vmin) / (vmax - vmin) - 1.0).astype(np.float32)
+
+
+def normalize_to_zero_one(values: np.ndarray, vmin: float, vmax: float) -> np.ndarray:
+    if np.isclose(vmax, vmin):
+        return np.zeros_like(values, dtype=np.float32)
+    return ((values - vmin) / (vmax - vmin)).astype(np.float32)
 
 
 def load_opencarp_2d_voltage(
@@ -161,6 +195,96 @@ def load_opencarp_2d_voltage(
         coords_norm=coords_norm,
         values=values,
         bounds=bounds,
+        mesh_type="rectangular",
+    )
+
+
+def load_opencarp_unstructured_2d_voltage(
+    vm_path: str | Path,
+    pts_path: str | Path,
+    elem_path: str | Path | None = None,
+    dt: float = 1.0,
+    normalize_vm: bool = True,
+    vm_min: float | None = None,
+    vm_max: float | None = None,
+) -> OpenCARPVoltageData:
+    """Load openCARP voltage data on an unstructured 2D triangular mesh.
+
+    Returns point-time samples:
+
+        coords = [x, y, t]
+        values = normalized vm
+
+    The raw mesh coordinates are shifted to start at zero and converted from
+    micrometers to millimeters, matching the rectangular loader's convention.
+    """
+    vm_all = read_array_igb(vm_path)
+    points_um = read_pts(pts_path)
+
+    if vm_all.shape[1] != points_um.shape[0]:
+        raise ValueError(
+            f"vm node count ({vm_all.shape[1]}) does not match pts count ({points_um.shape[0]})."
+        )
+
+    points_mm = ((points_um - np.min(points_um, axis=0)) / 1000.0).astype(np.float32)
+    xy = points_mm[:, :2]
+    t = (np.arange(vm_all.shape[0], dtype=np.float32) * dt).astype(np.float32)
+
+    raw_vm_min = float(vm_all.min())
+    raw_vm_max = float(vm_all.max())
+    scale_min = raw_vm_min if vm_min is None else float(vm_min)
+    scale_max = raw_vm_max if vm_max is None else float(vm_max)
+    if normalize_vm:
+        vm_nodes_time = normalize_to_zero_one(vm_all.T, scale_min, scale_max)
+    else:
+        vm_nodes_time = vm_all.T.astype(np.float32)
+
+    coords = np.column_stack(
+        [
+            np.repeat(xy[:, 0], t.shape[0]),
+            np.repeat(xy[:, 1], t.shape[0]),
+            np.tile(t, xy.shape[0]),
+        ]
+    ).astype(np.float32)
+    values = vm_nodes_time.reshape(-1, 1).astype(np.float32)
+
+    bounds = {
+        "x_min": float(xy[:, 0].min()),
+        "x_max": float(xy[:, 0].max()),
+        "y_min": float(xy[:, 1].min()),
+        "y_max": float(xy[:, 1].max()),
+        "t_min": float(t.min()),
+        "t_max": float(t.max()),
+        "z_selected": float(points_mm[:, 2].mean()),
+        "vm_raw_min": raw_vm_min,
+        "vm_raw_max": raw_vm_max,
+        "vm_scale_min": scale_min,
+        "vm_scale_max": scale_max,
+        "vm_normalized": bool(normalize_vm),
+    }
+
+    coords_norm = np.column_stack(
+        [
+            normalize_to_minus_one_one(coords[:, 0], bounds["x_min"], bounds["x_max"]),
+            normalize_to_minus_one_one(coords[:, 1], bounds["y_min"], bounds["y_max"]),
+            normalize_to_minus_one_one(coords[:, 2], bounds["t_min"], bounds["t_max"]),
+        ]
+    ).astype(np.float32)
+
+    triangles = read_elem_triangles(elem_path) if elem_path is not None else None
+
+    return OpenCARPVoltageData(
+        x=np.unique(xy[:, 0]).astype(np.float32),
+        y=np.unique(xy[:, 1]).astype(np.float32),
+        t=t,
+        vm=vm_nodes_time,
+        coords=coords,
+        coords_norm=coords_norm,
+        values=values,
+        bounds=bounds,
+        mesh_type="unstructured",
+        points=xy,
+        triangles=triangles,
     )
 
 
@@ -180,13 +304,26 @@ def subset_time_window(
         raise ValueError(f"No time frames found in requested window [{t_min}, {t_max}].")
 
     t = data.t[time_mask].astype(np.float32)
-    vm = data.vm[:, :, time_mask].astype(np.float32)
 
-    x_grid, y_grid, t_grid = np.meshgrid(data.x, data.y, t, indexing="ij")
-    coords = np.column_stack(
-        [x_grid.reshape(-1), y_grid.reshape(-1), t_grid.reshape(-1)]
-    ).astype(np.float32)
-    values = vm.reshape(-1, 1).astype(np.float32)
+    if data.mesh_type == "unstructured":
+        if data.points is None:
+            raise ValueError("Unstructured data is missing node coordinates.")
+        vm = data.vm[:, time_mask].astype(np.float32)
+        coords = np.column_stack(
+            [
+                np.repeat(data.points[:, 0], t.shape[0]),
+                np.repeat(data.points[:, 1], t.shape[0]),
+                np.tile(t, data.points.shape[0]),
+            ]
+        ).astype(np.float32)
+        values = vm.reshape(-1, 1).astype(np.float32)
+    else:
+        vm = data.vm[:, :, time_mask].astype(np.float32)
+        x_grid, y_grid, t_grid = np.meshgrid(data.x, data.y, t, indexing="ij")
+        coords = np.column_stack(
+            [x_grid.reshape(-1), y_grid.reshape(-1), t_grid.reshape(-1)]
+        ).astype(np.float32)
+        values = vm.reshape(-1, 1).astype(np.float32)
 
     bounds = data.bounds.copy()
     bounds["t_min"] = float(t.min())
@@ -209,6 +346,9 @@ def subset_time_window(
         coords_norm=coords_norm,
         values=values,
         bounds=bounds,
+        mesh_type=data.mesh_type,
+        points=data.points,
+        triangles=data.triangles,
     )
 
 
@@ -217,6 +357,8 @@ def train_test_split_points(
     values: np.ndarray,
     train_fraction: float = 0.25,
     seed: int = 42,
+    max_train_points: int | None = None,
+    max_test_points: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
     n_points = coords.shape[0]
@@ -224,5 +366,10 @@ def train_test_split_points(
     indices = rng.permutation(n_points)
     train_idx = indices[:n_train]
     test_idx = indices[n_train:]
-    return coords[train_idx], values[train_idx], coords[test_idx], values[test_idx]
 
+    if max_train_points is not None and train_idx.shape[0] > max_train_points:
+        train_idx = rng.choice(train_idx, size=max_train_points, replace=False)
+    if max_test_points is not None and test_idx.shape[0] > max_test_points:
+        test_idx = rng.choice(test_idx, size=max_test_points, replace=False)
+
+    return coords[train_idx], values[train_idx], coords[test_idx], values[test_idx]
